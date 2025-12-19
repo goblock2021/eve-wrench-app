@@ -11,6 +11,8 @@
 
 ---
 
+<img width="1112" height="712" alt="app" src="https://github.com/user-attachments/assets/8ed5f561-79ad-4162-bea2-e1461e152975" />
+
 ## Features
 
 - **Backup Settings** — Create named backups of account and character settings
