@@ -79,10 +79,10 @@ EVE Online stores all user settings locally. Understanding this structure helps 
 
 ### Root Directory
 
-| OS      | Path                                     |
-| ------- | ---------------------------------------- |
-| macOS   | `~/Library/Application Support/CCP/EVE/` |
-| Windows | `%LocalAppData%\CCP\EVE\`                |
+| OS      | Path                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------- |
+| macOS   | `~/Library/Application Support/CCP/EVE/`                                                            |
+| Windows | `%LocalAppData%\CCP\EVE\`                                                                           |
 | Linux   | `~/.local/share/Steam/steamapps/compatdata/8500/pfx/drive_c/users/steamuser/AppData/Local/CCP/EVE/` |
 
 ### Server Folders
