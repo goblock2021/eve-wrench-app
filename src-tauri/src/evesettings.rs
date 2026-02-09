@@ -148,7 +148,13 @@ fn eve_settings_root() -> Option<PathBuf> {
     {
         dirs::data_local_dir().map(|d| d.join("CCP/EVE"))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        dirs::home_dir().map(|h| {
+            h.join(".local/share/Steam/steamapps/compatdata/8500/pfx/drive_c/users/steamuser/AppData/Local/CCP/EVE")
+        })
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         None
     }
