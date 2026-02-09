@@ -83,6 +83,7 @@ EVE Online stores all user settings locally. Understanding this structure helps 
 | ------- | ---------------------------------------- |
 | macOS   | `~/Library/Application Support/CCP/EVE/` |
 | Windows | `%LocalAppData%\CCP\EVE\`                |
+| Linux   | `~/.local/share/Steam/steamapps/compatdata/8500/pfx/drive_c/users/steamuser/AppData/Local/CCP/EVE/` |
 
 ### Server Folders
 
@@ -168,15 +169,15 @@ EVE Wrench stores backups in a `backups/` subfolder within each profile. Backup 
 
 ### macOS
 
-Download the latest `.dmg` from [Releases](https://github.com/YOUR_USERNAME/eve-wrench/releases), open it, and drag EVE Wrench to your Applications folder.
+Download the latest `.dmg` from [Releases](https://github.com/eve-wrench/eve-wrench-app/releases), open it, and drag EVE Wrench to your Applications folder.
 
 ### Windows
 
-Download the latest `.msi` installer from [Releases](https://github.com/YOUR_USERNAME/eve-wrench/releases) and run it.
+Download the latest `.msi` installer from [Releases](https://github.com/eve-wrench/eve-wrench-app/releases) and run it.
 
 ### Linux
 
-Download the latest `.AppImage` from [Releases](https://github.com/YOUR_USERNAME/eve-wrench/releases):
+Download the latest `.AppImage` from [Releases](https://github.com/eve-wrench/eve-wrench-app/releases):
 
 ```bash
 chmod +x eve-wrench_*.AppImage
@@ -212,7 +213,7 @@ chmod +x eve-wrench_*.AppImage
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/eve-wrench.git
+git clone https://github.com/eve-wrench/eve-wrench-app.git
 cd eve-wrench
 
 npm install
