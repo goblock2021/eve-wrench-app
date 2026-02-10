@@ -4,7 +4,8 @@ import { onMounted } from 'vue'
 import { useColorMode } from '@vueuse/core'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { Rocket } from 'lucide-vue-next'
+import { Rocket, FolderOpen } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
 import TitleBar from '@/components/TitleBar.vue'
 import SettingsBrowser from '@/components/SettingsBrowser.vue'
 import CopyPanel from '@/components/CopyPanel.vue'
@@ -27,6 +28,7 @@ const {
     sourceKind,
     canCopy,
     hasData,
+    customEvePath,
     init,
     refresh,
     setSource,
@@ -43,6 +45,8 @@ const {
     isSource,
     isTarget,
     setBracketsAlwaysShow,
+    selectCustomEvePath,
+    clearCustomEvePath,
 } = useCopyManager()
 
 function isBackupSource(backup: { id: string }): boolean {
@@ -82,8 +86,11 @@ onMounted(init)
             <TitleBar
                 :loading="loading"
                 :color-mode="colorMode"
+                :custom-eve-path="customEvePath"
                 @refresh="refresh"
                 @toggle-theme="toggleDarkMode"
+                @select-eve-path="selectCustomEvePath"
+                @clear-eve-path="clearCustomEvePath"
             />
 
             <main class="flex flex-1 overflow-hidden">
@@ -114,6 +121,15 @@ onMounted(init)
                                 Make sure EVE Online is installed and has been
                                 launched at least once.
                             </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                class="mt-2"
+                                @click="selectCustomEvePath"
+                            >
+                                <FolderOpen class="mr-2 size-4" />
+                                Set custom folder path
+                            </Button>
                         </div>
                     </div>
                 </template>

@@ -11,6 +11,9 @@ import {
     Sun,
     Moon,
     RefreshCw,
+    Settings,
+    FolderOpen,
+    RotateCcw,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
@@ -18,15 +21,26 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 defineProps<{
     loading: boolean
     colorMode: string
+    customEvePath: string | null
 }>()
 
 const emit = defineEmits<{
     refresh: []
     toggleTheme: []
+    selectEvePath: []
+    clearEvePath: []
 }>()
 
 const appWindow = getCurrentWindow()
@@ -79,6 +93,42 @@ async function close() {
 
         <!-- Right: Actions + Window controls -->
         <div class="flex shrink-0 items-center justify-end gap-1">
+            <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        class="size-8"
+                        title="Settings"
+                    >
+                        <Settings class="size-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="w-64">
+                    <DropdownMenuLabel>EVE Settings Folder</DropdownMenuLabel>
+                    <DropdownMenuItem @click="emit('selectEvePath')">
+                        <FolderOpen class="mr-2 size-4" />
+                        {{
+                            customEvePath
+                                ? 'Change folder...'
+                                : 'Set custom folder...'
+                        }}
+                    </DropdownMenuItem>
+                    <template v-if="customEvePath">
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel
+                            class="font-normal text-xs text-muted-foreground truncate"
+                        >
+                            {{ customEvePath }}
+                        </DropdownMenuLabel>
+                        <DropdownMenuItem @click="emit('clearEvePath')">
+                            <RotateCcw class="mr-2 size-4" />
+                            Reset to default
+                        </DropdownMenuItem>
+                    </template>
+                </DropdownMenuContent>
+            </DropdownMenu>
+
             <Tooltip>
                 <TooltipTrigger as-child>
                     <Button

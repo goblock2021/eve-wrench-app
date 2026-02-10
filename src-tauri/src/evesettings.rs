@@ -139,7 +139,14 @@ pub struct AppData {
     pub backups: Vec<BackupEntry>,
 }
 
-fn eve_settings_root() -> Option<PathBuf> {
+fn eve_settings_root(custom_path: Option<&str>) -> Option<PathBuf> {
+    if let Some(p) = custom_path {
+        let path = PathBuf::from(p);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
         dirs::home_dir().map(|h| h.join("Library/Application Support/CCP/EVE"))
@@ -338,8 +345,9 @@ fn parse_settings_file(
 }
 
 fn scan_installations(
+    custom_eve_path: Option<&str>,
 ) -> Result<(HashMap<Server, Vec<ProfileData>>, HashMap<Server, PathBuf>), String> {
-    let root = eve_settings_root().ok_or("EVE settings directory not found")?;
+    let root = eve_settings_root(custom_eve_path).ok_or("EVE settings directory not found")?;
 
     if !root.exists() {
         return Ok((HashMap::new(), HashMap::new()));
@@ -448,8 +456,8 @@ fn scan_installations(
     Ok((server_profiles, server_paths))
 }
 
-fn scan_backups() -> Result<Vec<BackupEntry>, String> {
-    let eve_root = match eve_settings_root() {
+fn scan_backups(custom_eve_path: Option<&str>) -> Result<Vec<BackupEntry>, String> {
+    let eve_root = match eve_settings_root(custom_eve_path) {
         Some(r) => r,
         None => return Ok(Vec::new()),
     };
@@ -535,9 +543,12 @@ fn scan_backups() -> Result<Vec<BackupEntry>, String> {
 }
 
 #[tauri::command]
-pub async fn get_app_data(app: tauri::AppHandle) -> Result<AppData, String> {
-    let (mut server_profiles, server_paths) = scan_installations()?;
-    let mut backups = scan_backups()?;
+pub async fn get_app_data(
+    app: tauri::AppHandle,
+    custom_eve_path: Option<String>,
+) -> Result<AppData, String> {
+    let (mut server_profiles, server_paths) = scan_installations(custom_eve_path.as_deref())?;
+    let mut backups = scan_backups(custom_eve_path.as_deref())?;
     let aliases = load_aliases(&app);
 
     for profiles in server_profiles.values_mut() {

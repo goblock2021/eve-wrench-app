@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { open } from '@tauri-apps/plugin-dialog'
+import { load } from '@tauri-apps/plugin-store'
 import { toast } from 'vue-sonner'
 import type {
     SourceItem,
@@ -19,6 +21,7 @@ const loading = ref(true)
 const copying = ref(false)
 const source = ref<SourceItem | null>(null)
 const targets = ref<SettingsEntry[]>([])
+const customEvePath = ref<string | null>(null)
 let listenerSetup = false
 
 async function setupListener(loadDataFn: () => Promise<void>) {
@@ -55,7 +58,9 @@ export function useCopyManager() {
     async function loadData(showToast = false) {
         loading.value = true
         try {
-            appData.value = await invoke<AppData>('get_app_data')
+            appData.value = await invoke<AppData>('get_app_data', {
+                customEvePath: customEvePath.value,
+            })
             if (showToast) {
                 const serverCount = appData.value?.servers.length || 0
                 const backupCount = appData.value?.backups.length || 0
@@ -72,8 +77,54 @@ export function useCopyManager() {
         }
     }
 
+    async function loadCustomPath() {
+        try {
+            const store = await load('settings.json')
+            customEvePath.value =
+                (await store.get<string>('customEvePath')) ?? null
+        } catch {
+            customEvePath.value = null
+        }
+    }
+
+    async function selectCustomEvePath() {
+        const selected = await open({
+            directory: true,
+            multiple: false,
+            title: 'Select EVE Settings Folder',
+        })
+        if (!selected) return
+
+        try {
+            const store = await load('settings.json')
+            await store.set('customEvePath', selected)
+            customEvePath.value = selected
+            toast.success('Custom path set', {
+                description: selected,
+            })
+            await loadData()
+        } catch (e: unknown) {
+            toast.error('Failed to set path', { description: String(e) })
+        }
+    }
+
+    async function clearCustomEvePath() {
+        try {
+            const store = await load('settings.json')
+            await store.delete('customEvePath')
+            customEvePath.value = null
+            toast.success('Path reset', {
+                description: 'Using default EVE settings location',
+            })
+            await loadData()
+        } catch (e: unknown) {
+            toast.error('Failed to reset path', { description: String(e) })
+        }
+    }
+
     async function init() {
         await setupListener(loadData)
+        await loadCustomPath()
         await loadData()
     }
 
@@ -309,6 +360,7 @@ export function useCopyManager() {
         sourceKind,
         canCopy,
         hasData,
+        customEvePath,
         init,
         refresh,
         setSource,
@@ -326,5 +378,7 @@ export function useCopyManager() {
         isSource,
         isTarget,
         setBracketsAlwaysShow,
+        selectCustomEvePath,
+        clearCustomEvePath,
     }
 }
