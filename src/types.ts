@@ -63,6 +63,35 @@ export interface AppData {
     backups: BackupEntry[]
 }
 
+export interface ExportResult {
+    file_count: number
+    path: string
+}
+
+export interface ImportFileInfo {
+    relative_path: string
+}
+
+export interface ImportConflictInfo {
+    relative_path: string
+    local_modified: number
+    archive_checksum: string
+}
+
+export interface ImportAnalysis {
+    new_files: ImportFileInfo[]
+    conflicts: ImportConflictInfo[]
+    unchanged: ImportFileInfo[]
+    aliases_conflict: boolean
+    total_files: number
+}
+
+export interface ImportResultInfo {
+    imported_count: number
+    skipped_count: number
+    backed_up_count: number
+}
+
 export type SourceItem = SettingsEntry | BackupEntry
 
 export function isBackup(item: SourceItem): item is BackupEntry {

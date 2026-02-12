@@ -1,10 +1,14 @@
 use crate::esi;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
+use zip::write::SimpleFileOptions;
+use zip::ZipArchive;
 
 fn emit_data_changed(app: &tauri::AppHandle) {
     let _ = app.emit("data-changed", ());
@@ -785,4 +789,442 @@ pub fn set_brackets_always_show(
     write_brackets_setting(&path, enabled)?;
     emit_data_changed(&app);
     Ok(())
+}
+
+// ── Export / Import ──────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ManifestFileEntry {
+    pub relative_path: String,
+    pub sha256: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ExportManifest {
+    pub app_version: String,
+    pub timestamp: u64,
+    pub files: Vec<ManifestFileEntry>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ExportResult {
+    pub file_count: usize,
+    pub path: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ImportFileInfo {
+    pub relative_path: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ImportConflictInfo {
+    pub relative_path: String,
+    pub local_modified: u64,
+    pub archive_checksum: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ImportAnalysis {
+    pub new_files: Vec<ImportFileInfo>,
+    pub conflicts: Vec<ImportConflictInfo>,
+    pub unchanged: Vec<ImportFileInfo>,
+    pub aliases_conflict: bool,
+    pub total_files: usize,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ImportResultInfo {
+    pub imported_count: usize,
+    pub skipped_count: usize,
+    pub backed_up_count: usize,
+}
+
+fn sha256_of_bytes(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+fn sha256_of_file(path: &Path) -> Result<String, String> {
+    let data = fs::read(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    Ok(sha256_of_bytes(&data))
+}
+
+fn collect_exportable_files(eve_root: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
+
+    let server_dirs = fs::read_dir(eve_root).map_err(|e| e.to_string())?;
+
+    for server_entry in server_dirs.flatten() {
+        let server_path = server_entry.path();
+        if !server_path.is_dir() {
+            continue;
+        }
+
+        let profile_dirs = match fs::read_dir(&server_path) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for profile_entry in profile_dirs.flatten() {
+            let profile_path = profile_entry.path();
+            if !profile_path.is_dir() {
+                continue;
+            }
+
+            let dir_name = profile_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if !dir_name.starts_with("settings_") {
+                continue;
+            }
+
+            // Collect .dat files
+            if let Ok(entries) = fs::read_dir(&profile_path) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if fname.ends_with(".dat") && fname.starts_with("core_") {
+                            let rel = p
+                                .strip_prefix(eve_root)
+                                .map_err(|e| e.to_string())?
+                                .to_string_lossy()
+                                .into_owned();
+                            files.push((p, rel));
+                        } else if fname == "prefs.ini" {
+                            let rel = p
+                                .strip_prefix(eve_root)
+                                .map_err(|e| e.to_string())?
+                                .to_string_lossy()
+                                .into_owned();
+                            files.push((p, rel));
+                        }
+                    }
+                }
+            }
+
+            // Collect backup files
+            let backup_dir = profile_path.join("backups");
+            if backup_dir.is_dir() {
+                if let Ok(entries) = fs::read_dir(&backup_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_file() {
+                            let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            if fname.ends_with(".bak") {
+                                let rel = p
+                                    .strip_prefix(eve_root)
+                                    .map_err(|e| e.to_string())?
+                                    .to_string_lossy()
+                                    .into_owned();
+                                files.push((p, rel));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+#[tauri::command]
+pub fn export_settings(
+    app: tauri::AppHandle,
+    custom_eve_path: Option<String>,
+    export_path: String,
+) -> Result<ExportResult, String> {
+    let eve_root =
+        eve_settings_root(custom_eve_path.as_deref()).ok_or("EVE settings directory not found")?;
+
+    if !eve_root.exists() {
+        return Err("EVE settings directory does not exist".into());
+    }
+
+    let exportable_files = collect_exportable_files(&eve_root)?;
+
+    let dest = PathBuf::from(&export_path);
+    let file = fs::File::create(&dest).map_err(|e| format!("Failed to create zip: {}", e))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    let mut manifest_files: Vec<ManifestFileEntry> = Vec::new();
+
+    for (abs_path, rel_path) in &exportable_files {
+        let data = fs::read(abs_path)
+            .map_err(|e| format!("Failed to read {}: {}", abs_path.display(), e))?;
+        let checksum = sha256_of_bytes(&data);
+
+        zip.start_file(rel_path, options)
+            .map_err(|e| format!("Failed to add to zip: {}", e))?;
+        zip.write_all(&data)
+            .map_err(|e| format!("Failed to write to zip: {}", e))?;
+
+        manifest_files.push(ManifestFileEntry {
+            relative_path: rel_path.clone(),
+            sha256: checksum,
+        });
+    }
+
+    // Add aliases.json if it exists
+    let aliases_path = aliases_file(&app)?;
+    if aliases_path.exists() {
+        let data = fs::read(&aliases_path).map_err(|e| format!("Failed to read aliases: {}", e))?;
+        let checksum = sha256_of_bytes(&data);
+
+        zip.start_file("aliases.json", options)
+            .map_err(|e| format!("Failed to add aliases to zip: {}", e))?;
+        zip.write_all(&data)
+            .map_err(|e| format!("Failed to write aliases to zip: {}", e))?;
+
+        manifest_files.push(ManifestFileEntry {
+            relative_path: "aliases.json".to_string(),
+            sha256: checksum,
+        });
+    }
+
+    // Create and add manifest
+    let version = env!("CARGO_PKG_VERSION").to_string();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let manifest = ExportManifest {
+        app_version: version,
+        timestamp,
+        files: manifest_files,
+    };
+
+    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+
+    zip.start_file("manifest.json", options)
+        .map_err(|e| format!("Failed to add manifest: {}", e))?;
+    zip.write_all(manifest_json.as_bytes())
+        .map_err(|e| format!("Failed to write manifest: {}", e))?;
+
+    zip.finish()
+        .map_err(|e| format!("Failed to finalize zip: {}", e))?;
+
+    let file_count = manifest.files.len();
+    Ok(ExportResult {
+        file_count,
+        path: export_path,
+    })
+}
+
+#[tauri::command]
+pub fn analyze_import(
+    app: tauri::AppHandle,
+    import_path: String,
+    custom_eve_path: Option<String>,
+) -> Result<ImportAnalysis, String> {
+    let eve_root =
+        eve_settings_root(custom_eve_path.as_deref()).ok_or("EVE settings directory not found")?;
+
+    let file = fs::File::open(&import_path).map_err(|e| format!("Failed to open zip: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid zip file: {}", e))?;
+
+    // Read manifest
+    let manifest: ExportManifest = {
+        let mut manifest_file = archive
+            .by_name("manifest.json")
+            .map_err(|_| "No manifest.json found in archive - not a valid EVE Wrench export")?;
+        let mut content = String::new();
+        manifest_file
+            .read_to_string(&mut content)
+            .map_err(|e| format!("Failed to read manifest: {}", e))?;
+        serde_json::from_str(&content).map_err(|e| format!("Invalid manifest: {}", e))?
+    };
+
+    let mut new_files: Vec<ImportFileInfo> = Vec::new();
+    let mut conflicts: Vec<ImportConflictInfo> = Vec::new();
+    let mut unchanged: Vec<ImportFileInfo> = Vec::new();
+    let mut aliases_conflict = false;
+
+    let aliases_path = aliases_file(&app)?;
+
+    for entry in &manifest.files {
+        let rel = &entry.relative_path;
+
+        if rel == "aliases.json" {
+            if aliases_path.exists() {
+                let local_checksum = sha256_of_file(&aliases_path)?;
+                if local_checksum != entry.sha256 {
+                    aliases_conflict = true;
+                    conflicts.push(ImportConflictInfo {
+                        relative_path: rel.clone(),
+                        local_modified: fs::metadata(&aliases_path)
+                            .and_then(|m| m.modified())
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0),
+                        archive_checksum: entry.sha256.clone(),
+                    });
+                } else {
+                    unchanged.push(ImportFileInfo {
+                        relative_path: rel.clone(),
+                    });
+                }
+            } else {
+                new_files.push(ImportFileInfo {
+                    relative_path: rel.clone(),
+                });
+            }
+            continue;
+        }
+
+        let local_path = eve_root.join(rel);
+        if local_path.exists() {
+            let local_checksum = sha256_of_file(&local_path)?;
+            if local_checksum != entry.sha256 {
+                let local_modified = fs::metadata(&local_path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                conflicts.push(ImportConflictInfo {
+                    relative_path: rel.clone(),
+                    local_modified,
+                    archive_checksum: entry.sha256.clone(),
+                });
+            } else {
+                unchanged.push(ImportFileInfo {
+                    relative_path: rel.clone(),
+                });
+            }
+        } else {
+            new_files.push(ImportFileInfo {
+                relative_path: rel.clone(),
+            });
+        }
+    }
+
+    let total_files = manifest.files.len();
+
+    Ok(ImportAnalysis {
+        new_files,
+        conflicts,
+        unchanged,
+        aliases_conflict,
+        total_files,
+    })
+}
+
+#[tauri::command]
+pub fn execute_import(
+    app: tauri::AppHandle,
+    import_path: String,
+    custom_eve_path: Option<String>,
+    overwrite_paths: Vec<String>,
+) -> Result<ImportResultInfo, String> {
+    let eve_root =
+        eve_settings_root(custom_eve_path.as_deref()).ok_or("EVE settings directory not found")?;
+
+    let file = fs::File::open(&import_path).map_err(|e| format!("Failed to open zip: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid zip file: {}", e))?;
+
+    // Read manifest
+    let manifest: ExportManifest = {
+        let mut manifest_file = archive
+            .by_name("manifest.json")
+            .map_err(|_| "No manifest.json found in archive")?;
+        let mut content = String::new();
+        manifest_file
+            .read_to_string(&mut content)
+            .map_err(|e| format!("Failed to read manifest: {}", e))?;
+        serde_json::from_str(&content).map_err(|e| format!("Invalid manifest: {}", e))?
+    };
+
+    let aliases_path = aliases_file(&app)?;
+    let mut imported_count = 0usize;
+    let mut skipped_count = 0usize;
+    let mut backed_up_count = 0usize;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let overwrite_set: std::collections::HashSet<&str> =
+        overwrite_paths.iter().map(|s| s.as_str()).collect();
+
+    for entry in &manifest.files {
+        let rel = &entry.relative_path;
+
+        // Read file data from archive
+        let mut zip_file = match archive.by_name(rel) {
+            Ok(f) => f,
+            Err(_) => {
+                skipped_count += 1;
+                continue;
+            }
+        };
+        let mut data = Vec::new();
+        zip_file
+            .read_to_end(&mut data)
+            .map_err(|e| format!("Failed to read {} from archive: {}", rel, e))?;
+
+        let target_path = if rel == "aliases.json" {
+            aliases_path.clone()
+        } else {
+            eve_root.join(rel)
+        };
+
+        // Check if this is a conflict
+        if target_path.exists() {
+            let local_checksum = sha256_of_file(&target_path)?;
+            if local_checksum == entry.sha256 {
+                // Identical, skip
+                skipped_count += 1;
+                continue;
+            }
+
+            if !overwrite_set.contains(rel.as_str()) {
+                skipped_count += 1;
+                continue;
+            }
+
+            // Back up existing file before overwriting
+            if rel != "aliases.json" {
+                if let Some(parent) = target_path.parent() {
+                    let backup_dir = parent.join("backups");
+                    let _ = fs::create_dir_all(&backup_dir);
+
+                    if let Some(fname) = target_path.file_name().and_then(|n| n.to_str()) {
+                        let backup_name = format!("pre_import_{}_{}", fname, timestamp);
+                        let backup_path = backup_dir.join(&backup_name);
+                        if fs::copy(&target_path, &backup_path).is_ok() {
+                            backed_up_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Ensure parent directory exists
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+
+        // Write the file
+        fs::write(&target_path, &data).map_err(|e| format!("Failed to write {}: {}", rel, e))?;
+
+        imported_count += 1;
+    }
+
+    emit_data_changed(&app);
+
+    Ok(ImportResultInfo {
+        imported_count,
+        skipped_count,
+        backed_up_count,
+    })
 }

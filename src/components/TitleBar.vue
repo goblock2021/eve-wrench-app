@@ -14,6 +14,8 @@ import {
     Settings,
     FolderOpen,
     RotateCcw,
+    Download,
+    Upload,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,6 +43,8 @@ const emit = defineEmits<{
     toggleTheme: []
     selectEvePath: []
     clearEvePath: []
+    exportSettings: []
+    importSettings: []
 }>()
 
 const appWindow = getCurrentWindow()
@@ -126,6 +130,16 @@ async function close() {
                             Reset to default
                         </DropdownMenuItem>
                     </template>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>Import / Export</DropdownMenuLabel>
+                    <DropdownMenuItem @click="emit('exportSettings')">
+                        <Download class="mr-2 size-4" />
+                        Export settings...
+                    </DropdownMenuItem>
+                    <DropdownMenuItem @click="emit('importSettings')">
+                        <Upload class="mr-2 size-4" />
+                        Import settings...
+                    </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
 

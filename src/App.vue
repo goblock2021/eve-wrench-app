@@ -12,6 +12,7 @@ import CopyPanel from '@/components/CopyPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import PromptDialog from '@/components/PromptDialog.vue'
 import UpdateModal from '@/components/UpdateModal.vue'
+import ImportDialog from '@/components/ImportDialog.vue'
 import { useCopyManager } from '@/composables/useCopyManager'
 import { useUpdateChecker } from '@/composables/useUpdateChecker'
 import { isBackup } from '@/types'
@@ -47,6 +48,12 @@ const {
     setBracketsAlwaysShow,
     selectCustomEvePath,
     clearCustomEvePath,
+    exportSettings,
+    importSettings,
+    executeImport,
+    cancelImport,
+    importAnalysis,
+    showImportDialog,
 } = useCopyManager()
 
 function isBackupSource(backup: { id: string }): boolean {
@@ -77,6 +84,13 @@ onMounted(init)
             />
             <ConfirmDialog />
             <PromptDialog />
+            <ImportDialog
+                v-if="importAnalysis"
+                :open="showImportDialog"
+                :analysis="importAnalysis"
+                @confirm="executeImport"
+                @cancel="cancelImport"
+            />
             <UpdateModal
                 v-if="updateAvailable && updateInfo && !dismissed"
                 :info="updateInfo"
@@ -91,6 +105,8 @@ onMounted(init)
                 @toggle-theme="toggleDarkMode"
                 @select-eve-path="selectCustomEvePath"
                 @clear-eve-path="clearCustomEvePath"
+                @export-settings="exportSettings"
+                @import-settings="importSettings"
             />
 
             <main class="flex flex-1 overflow-hidden">

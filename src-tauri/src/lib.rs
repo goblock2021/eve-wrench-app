@@ -3,7 +3,8 @@ mod evesettings;
 mod updates;
 
 use evesettings::{
-    copy_settings, create_backup, delete_backup, get_app_data, set_alias, set_brackets_always_show,
+    analyze_import, copy_settings, create_backup, delete_backup, execute_import, export_settings,
+    get_app_data, set_alias, set_brackets_always_show,
 };
 use updates::check_for_update;
 
@@ -22,6 +23,9 @@ pub fn run() {
             set_alias,
             set_brackets_always_show,
             check_for_update,
+            export_settings,
+            analyze_import,
+            execute_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { load } from '@tauri-apps/plugin-store'
 import { toast } from 'vue-sonner'
 import type {
@@ -11,6 +11,9 @@ import type {
     ProfileData,
     BackupEntry,
     AppData,
+    ExportResult,
+    ImportAnalysis,
+    ImportResultInfo,
 } from '@/types'
 import { isBackup } from '@/types'
 import { useConfirm } from './useConfirm'
@@ -22,6 +25,9 @@ const copying = ref(false)
 const source = ref<SourceItem | null>(null)
 const targets = ref<SettingsEntry[]>([])
 const customEvePath = ref<string | null>(null)
+const importAnalysis = ref<ImportAnalysis | null>(null)
+const importFilePath = ref<string | null>(null)
+const showImportDialog = ref(false)
 let listenerSetup = false
 
 async function setupListener(loadDataFn: () => Promise<void>) {
@@ -340,6 +346,76 @@ export function useCopyManager() {
         loadData(true)
     }
 
+    async function exportSettings() {
+        const exportPath = await save({
+            title: 'Export EVE Settings',
+            defaultPath: `eve-wrench-export-${Date.now()}.zip`,
+            filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+        })
+        if (!exportPath) return
+
+        try {
+            const result = await invoke<ExportResult>('export_settings', {
+                customEvePath: customEvePath.value,
+                exportPath,
+            })
+            toast.success('Settings exported', {
+                description: `Exported ${result.file_count} file(s) to ${result.path}`,
+            })
+        } catch (e: unknown) {
+            toast.error('Export failed', { description: String(e) })
+        }
+    }
+
+    async function importSettings() {
+        const selected = await open({
+            title: 'Import EVE Settings',
+            multiple: false,
+            filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+        })
+        if (!selected) return
+
+        try {
+            const analysis = await invoke<ImportAnalysis>('analyze_import', {
+                importPath: selected,
+                customEvePath: customEvePath.value,
+            })
+            importAnalysis.value = analysis
+            importFilePath.value = selected
+            showImportDialog.value = true
+        } catch (e: unknown) {
+            toast.error('Import analysis failed', { description: String(e) })
+        }
+    }
+
+    async function executeImport(overwritePaths: string[]) {
+        if (!importFilePath.value) return
+
+        showImportDialog.value = false
+
+        try {
+            const result = await invoke<ImportResultInfo>('execute_import', {
+                importPath: importFilePath.value,
+                customEvePath: customEvePath.value,
+                overwritePaths,
+            })
+            toast.success('Settings imported', {
+                description: `Imported ${result.imported_count} file(s), skipped ${result.skipped_count}, backed up ${result.backed_up_count}`,
+            })
+        } catch (e: unknown) {
+            toast.error('Import failed', { description: String(e) })
+        } finally {
+            importAnalysis.value = null
+            importFilePath.value = null
+        }
+    }
+
+    function cancelImport() {
+        showImportDialog.value = false
+        importAnalysis.value = null
+        importFilePath.value = null
+    }
+
     async function setBracketsAlwaysShow(serverPath: string, enabled: boolean) {
         try {
             await invoke('set_brackets_always_show', { serverPath, enabled })
@@ -380,5 +456,11 @@ export function useCopyManager() {
         setBracketsAlwaysShow,
         selectCustomEvePath,
         clearCustomEvePath,
+        exportSettings,
+        importSettings,
+        executeImport,
+        cancelImport,
+        importAnalysis,
+        showImportDialog,
     }
 }
